@@ -1,0 +1,108 @@
+
+# ============================================================
+# SSC P3 - Neural Network Acceleration on NVIDIA Jetson
+# PyTorch | YOLO | ONNX | TensorRT | CUDA | FLIR ADAS
+# ============================================================
+
+# 1. Python virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# 2. Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# 3. Environment variables and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# 4. IDE and operating system
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.example.json
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 5. FLIR ADAS dataset
+# Keep data/README.md and data/.gitkeep if needed
+data/*
+!data/README.md
+!data/.gitkeep
+
+# 6. Trained models and neural network weights
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.weights
+
+# 7. ONNX and TensorRT generated models
+*.onnx
+*.engine
+*.plan
+
+# 8. Ultralytics generated files
+runs/
+wandb/
+mlruns/
+
+# 9. Temporary images, videos and generated outputs
+bus.jpg
+results/*
+!results/README.md
+!results/.gitkeep
+!results/final/
+results/final/*
+!results/final/README.md
+!results/final/*.csv
+!results/final/*.json
+!results/final/*.png
+!results/final/*.jpg
+!results/final/*.pdf
+
+# 10. Temporary files and logs
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+.ipynb_checkpoints/
+
+# 11. Local benchmark artifacts
+benchmarks/raw/
+benchmarks/temp/
+benchmarks/cache/
+
+# 12. CUDA and C++ build artifacts
+*.o
+*.obj
+*.a
+*.lib
+*.dll
+*.so
+*.pyd
+*.exe
+*.exp
+*.pdb
+CMakeFiles/
+CMakeCache.txt
+cmake-build-*/
+*.pt
+
+# Sample images
+data/samples/
