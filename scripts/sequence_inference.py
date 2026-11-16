@@ -1,9 +1,9 @@
-
 from pathlib import Path
 from collections import defaultdict
 import re
 import time
 
+import json
 import cv2
 import torch
 from ultralytics import YOLO
@@ -11,8 +11,19 @@ from ultralytics import YOLO
 
 ROOT = Path(__file__).resolve().parents[1]
 
+BACKEND ="onnx" #determina ce fisier incarcam si cum numim rezultatele
+
 FRAMES_DIR = ROOT / "data/raw/flir_adas_v2/video_rgb_test/data"
-MODEL_PATH = ROOT / "models/pretrained/yolo11n.pt"
+
+MODEL_PATH = {
+    "pytorch": ROOT / "models/pretrained/yolo11n.pt",
+    "onnx": ROOT / "models/onnx/yolo11n.onnx"
+}
+
+MODEL_PATH = MODEL_PATH[BACKEND]
+
+SEQUENCE_ID = "video-RMxN6a4CcCeLGu4tA"
+
 OUTPUT_DIR = ROOT / "results/sequence_inference"
 
 # Limitam primul test la 150 de cadre.
@@ -60,11 +71,11 @@ def find_sequence_frames(folder):
             "Nu am gasit cadre cu numele asteptat."
         )
 
-    # Pentru demo alegem cea mai lunga secventa.
-    sequence_id, frames = max(
-        sequences.items(),
-        key=lambda item: len(item[1])
-    )
+    if SEQUENCE_ID not in sequences:
+        raise RuntimeError(f"Nu am găsit secvența: {SEQUENCE_ID}")
+
+    sequence_id = SEQUENCE_ID
+    frames = sequences[sequence_id]
 
     frames.sort(key=lambda item: item[0])
 
@@ -93,7 +104,9 @@ def main():
 
     height, width = first_frame.shape[:2]
 
-    output_path = OUTPUT_DIR / "flir_rgb_detection.mp4"
+    output_path = OUTPUT_DIR / f"flir_rgb_{BACKEND}.mp4"
+    predictions_path = OUTPUT_DIR / f"flir_rgb_{BACKEND}.json"
+    predictions = []
 
     writer = cv2.VideoWriter(
         str(output_path),
@@ -105,10 +118,11 @@ def main():
     if not writer.isOpened():
         raise RuntimeError("Nu pot crea fisierul MP4.")
 
-    device = 0 if torch.cuda.is_available() else "cpu"
+    device = "cpu"
+    print(f"Backend: {BACKEND}")
     print(f"Device: {device}")
 
-    model = YOLO(str(MODEL_PATH))
+    model = YOLO(str(MODEL_PATH), task="detect")
 
     total_inference_time = 0.0
     processed_frames = 0
@@ -118,22 +132,43 @@ def main():
             frame = cv2.imread(str(frame_path))
 
             if frame is None:
-                print(f"Skipping: {frame_path.name}")
-                continue
+                raise RuntimeError(f"Nu pot citi cadrul: {frame_path.name}")
 
             start = time.perf_counter()
 
             results = model.predict(
                 source=frame,
+                imgsz=640,
+                rect=False,
+                conf=0.25,
+                iou=0.7,
+                max_det=300,
                 device=device,
-                verbose=False
+                verbose=False,
+                save=False,
             )
-
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
 
             elapsed = time.perf_counter() - start
             total_inference_time += elapsed
+
+            result = results[0]
+
+            detections = []
+
+            for box in result.boxes:
+                class_id = int(box.cls.item())
+
+                detections.append({
+                    "class_id": class_id,
+                    "class_name": result.names[class_id],
+                    "confidence": float(box.conf.item()),
+                    "xyxy": box.xyxy[0].cpu().tolist(),
+                })
+
+            predictions.append({
+                "frame": frame_path.name,
+                "detections": detections,
+            })
 
             annotated = results[0].plot()
 
@@ -157,6 +192,28 @@ def main():
 
     finally:
         writer.release()
+
+    report = {
+        "backend": BACKEND,
+        "sequence": sequence_id,
+        "device": device,
+        "settings": {
+            "imgsz": 640,
+            "rect": False,
+            "conf": 0.25,
+            "iou": 0.7,
+            "max_det": 300,
+        },
+        "processed_frames": processed_frames,
+        "frames": predictions,
+    }
+
+    predictions_path.write_text(
+        json.dumps(report, indent=2),
+        encoding="utf-8",
+    )
+
+    print(f"Predicții salvate: {predictions_path}")
 
     average_fps = (
         processed_frames / total_inference_time
