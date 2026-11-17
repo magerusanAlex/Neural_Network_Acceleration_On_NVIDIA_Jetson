@@ -11,13 +11,15 @@ from ultralytics import YOLO
 
 ROOT = Path(__file__).resolve().parents[1]
 
-BACKEND ="onnx" #determina ce fisier incarcam si cum numim rezultatele
+BACKEND ="tensorrt_fp16" #determina ce fisier incarcam si cum numim rezultatele
 
 FRAMES_DIR = ROOT / "data/raw/flir_adas_v2/video_rgb_test/data"
 
 MODEL_PATH = {
     "pytorch": ROOT / "models/pretrained/yolo11n.pt",
-    "onnx": ROOT / "models/onnx/yolo11n.onnx"
+    "onnx": ROOT / "models/onnx/yolo11n.onnx",
+    "tensorrt_fp32": ROOT / "models/tensorrt/yolo11n_fp32.engine",
+    "tensorrt_fp16": ROOT / "models/tensorrt/yolo11n_fp16.engine"
 }
 
 MODEL_PATH = MODEL_PATH[BACKEND]
@@ -118,7 +120,7 @@ def main():
     if not writer.isOpened():
         raise RuntimeError("Nu pot crea fisierul MP4.")
 
-    device = "cpu"
+    device = "cpu" if BACKEND == "onnx" else 0
     print(f"Backend: {BACKEND}")
     print(f"Device: {device}")
 
@@ -136,6 +138,9 @@ def main():
 
             start = time.perf_counter()
 
+            if device != "cpu":
+                torch.cuda.synchronize(device)
+
             results = model.predict(
                 source=frame,
                 imgsz=640,
@@ -144,9 +149,13 @@ def main():
                 iou=0.7,
                 max_det=300,
                 device=device,
+                data="coco.yaml",
                 verbose=False,
                 save=False,
             )
+
+            if device != "cpu":
+                torch.cuda.synchronize(device)
 
             elapsed = time.perf_counter() - start
             total_inference_time += elapsed
