@@ -1,111 +1,56 @@
+"""Run YOLO26 on an existing video file (use sequence_inference for FLIR JPGs)."""
 from pathlib import Path
-import time
-
+import math
 import cv2
-import torch
 from ultralytics import YOLO
+from _common import arguments, paths, SETTINGS, ROOT
 
-ROOT = Path(__file__).resolve().parents[1]
-
-MODEL_PATH = ROOT / "models" / "pretrained" / "yolo11n.pt"
-VIDEO_PATH = ROOT / "data" / "samples" / "video.mp4"
-OUTPUT_DIR = ROOT / "results" / "video_test"
 
 def main():
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-    if not MODEL_PATH.exists():
-        raise FileNotFoundError(f"Modelul nu exista: {MODEL_PATH}")
-
-    if not VIDEO_PATH.exists():
-            raise FileNotFoundError(f"Videoul nu exista: {VIDEO_PATH}")
-
-
-    device = 0 if torch.cuda.is_available() else "cpu"
-
-    model = YOLO(str(MODEL_PATH))
-
-    cap = cv2.VideoCapture(str(VIDEO_PATH))
-
-    if not cap.isOpened():
-         raise RuntimeError("Nu merge sa deschida videoul")
-
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    input_fps = int(cap.get(cv2.CAP_PROP_FPS))
-
-    if input_fps <= 0:
-         input_fps = 30.0
-
-    output_path = OUTPUT_DIR / "detected_video.mp4"
-
-    writer = cv2.VideoWriter(
-         str(output_path),
-         cv2.VideoWriter_fourcc(*"mp4v"),
-         input_fps,
-         (width, height),
-    )
-
-    if not writer.isOpened():
-         cap.release()
-         raise RuntimeError("Nu s-a putut crea videoul de iesire")
-
-    frame_count = 0
-    total_processing_time = 0.0
-
+    parser = arguments(__doc__, backend=True)
+    parser.add_argument('--source', type=Path, required=True)
+    args = parser.parse_args()
+    if not args.source.is_file():
+        raise FileNotFoundError(args.source)
+    weight = paths(args.task)[args.backend]
+    if not weight.is_file():
+        raise FileNotFoundError(weight)
+    model = YOLO(str(weight), task=args.task)
+    cap = cv2.VideoCapture(str(args.source))
+    writer = None
+    count = 0
+    output = ROOT / 'results/yolo26' / args.task / args.backend / 'video' / (args.source.stem + '_annotated.mp4')
+    if output.resolve() == args.source.resolve():
+        cap.release()
+        raise ValueError('Input and output must differ')
+    output.parent.mkdir(parents=True, exist_ok=True)
     try:
-         while True:
-            success, frame = cap.read()
-
-            if not success:
+        if not cap.isOpened():
+            raise RuntimeError('Cannot open video')
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        if not math.isfinite(fps) or fps <= 0:
+            fps = 20.0
+            print('Source FPS unavailable; using 20 FPS playback')
+        while True:
+            ok, frame = cap.read()
+            if not ok:
                 break
-
-            start = time.perf_counter()
-
-            results = model.predict(
-                 source=frame,
-                 device=device,
-                 verbose=False
-            )
-
-            annotated = results[0].plot()
-
-            if torch.cuda.is_available():
-                 torch.cuda.synchronize()
-
-            elapsed = time.perf_counter() - start
-            total_processing_time += elapsed
-
-            fps = 1.0 / elapsed if elapsed > 0 else 0.0
-
-            cv2.putText(
-                 annotated,
-                 f"FPS:{fps:.1f}",
-                 (20, 40),
-                 cv2.FONT_HERSHEY_SIMPLEX,
-                 1,
-                 (0, 255, 0),
-                 2,
-            )
-
-            writer.write(annotated)
-            frame_count += 1
-
-            if frame_count % 30 == 0:
-                print(f"Processed {frame_count} frames")
+            if writer is None:
+                writer = cv2.VideoWriter(str(output), cv2.VideoWriter_fourcc(*'mp4v'), fps, (frame.shape[1], frame.shape[0]))
+                if not writer.isOpened():
+                    raise RuntimeError('Cannot create output video')
+            result = model.predict(source=frame, device='cpu' if args.backend == 'onnx' else 0,
+                                   data='coco.yaml', verbose=False, save=False, **SETTINGS)[0]
+            writer.write(result.plot())
+            count += 1
     finally:
         cap.release()
-        writer.release()
+        if writer is not None:
+            writer.release()
+    if count == 0:
+        raise RuntimeError('No decodable frames')
+    print(f'Processed {count} frames: {output}')
 
-    avg_fps = (
-         frame_count / total_processing_time
-         if total_processing_time > 0
-         else 0.0
-    )
 
-    print(f"\nFrames processed: {frame_count}")
-    print(f"Average processing FPS: {avg_fps:.2f}")
-    print(f"Saved video: {output_path}")
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

@@ -1,17 +1,5 @@
-"""YOLO26 experiments: prepare, export, build, run and compare.
-
-Examples (from repository root):
-  .venv/Scripts/python.exe scripts/yolo26_pipeline.py prepare --task detect
-  .venv/Scripts/python.exe scripts/yolo26_pipeline.py export --task segment
-  .venv/Scripts/python.exe scripts/yolo26_pipeline.py build --task detect --precision fp16
-  .venv/Scripts/python.exe scripts/yolo26_pipeline.py run --task segment --backend fp32
-  .venv/Scripts/python.exe scripts/yolo26_pipeline.py compare --task segment --backend fp16
-
-Uses the one-to-many head and external NMS consistently (nms=None).
-Results are consistency checks, not ground-truth accuracy or speed benchmarks.
-"""
+"""Shared YOLO26 detection/instance-segmentation experiments, with external NMS."""
 from pathlib import Path
-import argparse
 import json
 import hashlib
 import time
@@ -23,7 +11,7 @@ import torch
 import ultralytics
 from ultralytics import YOLO
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 IMAGE = ROOT / 'data/raw/flir_adas_v2/images_rgb_val/data/video-Chrih8BX8fbZLmsoX-frame-001292-DxauLXa3S44rh37Z7.jpg'
 FRAMES = ROOT / 'data/raw/flir_adas_v2/video_rgb_test/data'
 SEQUENCE = 'video-RMxN6a4CcCeLGu4tA'
@@ -155,7 +143,7 @@ def run(task, backend, count):
                   settings=SETTINGS, classes=model.predictor.model.names, model_sha256=hashlib.sha256(p.read_bytes()).hexdigest(),
                   versions=dict(python=platform.python_version(), ultralytics=ultralytics.__version__, torch=torch.__version__),
                   scope='Prediction consistency only; not ground-truth accuracy or speed benchmark', frames=rows)
-    write_json(out / 'predictions.json', report)
+    write_json(out / ('predictions.json' if count else 'image_predictions.json'), report)
     print(f'DONE {task} {backend}: image={len(rows[0]["boxes"])}, sequence={sum(len(x["boxes"]) for x in rows[1:])}', flush=True)
 
 
@@ -174,10 +162,11 @@ def masks_at(folder, row):
         return np.unpackbits(data['bits'], count=int(np.prod(shape))).reshape(shape).astype(bool)
 
 
-def compare(task, backend):
+def compare(task, backend, image_only=False):
     base = ROOT / 'results/yolo26' / task
-    a = json.loads((base / 'pytorch/predictions.json').read_text())
-    b = json.loads((base / backend / 'predictions.json').read_text())
+    filename = 'image_predictions.json' if image_only else 'predictions.json'
+    a = json.loads((base / 'pytorch' / filename).read_text())
+    b = json.loads((base / backend / filename).read_text())
     if a['settings'] != b['settings'] or a['classes'] != b['classes'] or [r['image'] for r in a['frames']] != [r['image'] for r in b['frames']]:
         raise RuntimeError('Inconsistent frames, settings or class maps')
     summaries = []
@@ -207,25 +196,8 @@ def compare(task, backend):
             mean_mask_iou=float(np.mean(mask_ious)) if mask_ious else None, different_frames=different))
     report=dict(task=task, candidate=backend, reference='pytorch', matching='greedy same-class IoU >= 0.5, descending reference confidence',
         scope='Agreement, not ground-truth accuracy. No automatic pass/fail tolerance.', summaries=summaries)
-    write_json(base / backend / 'comparison.json', report)
+    if image_only:
+        report['summaries'] = report['summaries'][:1]
+    write_json(base / backend / ('image_comparison.json' if image_only else 'comparison.json'), report)
     print(json.dumps(report,indent=2), flush=True)
 
-
-def main():
-    parser=argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('action',choices=['prepare','export','build','run','compare'])
-    parser.add_argument('--task',choices=['detect','segment'],required=True)
-    parser.add_argument('--precision',choices=['fp32','fp16'],default='fp32')
-    parser.add_argument('--backend',choices=['pytorch','onnx','fp32','fp16'],default='pytorch')
-    parser.add_argument('--count',type=int,default=150)
-    args=parser.parse_args()
-    if args.count<1:parser.error('--count must be positive')
-    if args.action=='prepare':prepare(args.task)
-    elif args.action=='export':export(args.task)
-    elif args.action=='build':build(args.task,args.precision)
-    elif args.action=='run':run(args.task,args.backend,args.count)
-    else:compare(args.task,args.backend)
-
-
-if __name__=='__main__':
-    main()
