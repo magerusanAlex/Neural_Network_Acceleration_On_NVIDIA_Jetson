@@ -7,9 +7,15 @@ from ultralytics import YOLO
 
 ROOT = Path(__file__).resolve().parents[1]
 
-MODEL_PATH = ROOT / "models" / "pretrained" / "yolo11n.pt"
+# Alegem "detect" pentru YOLO26n sau "segment" pentru YOLO26n-seg.
+TASK = "detect"
+MODEL_NAME = "yolo26n" if TASK == "detect" else "yolo26n-seg"
+MODEL_DIR = ROOT / "models/yolo26" / TASK
+
+
+MODEL_PATH = MODEL_DIR / f"{MODEL_NAME}.pt"
 VIDEO_PATH = ROOT / "data" / "samples" / "video.mp4"
-OUTPUT_DIR = ROOT / "results" / "video_test"
+OUTPUT_DIR = ROOT / "results/yolo26" / TASK / "video_test"
 
 def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -23,7 +29,7 @@ def main():
 
     device = 0 if torch.cuda.is_available() else "cpu"
 
-    model = YOLO(str(MODEL_PATH))
+    model = YOLO(str(MODEL_PATH), task=TASK)
 
     cap = cv2.VideoCapture(str(VIDEO_PATH))
 
@@ -65,7 +71,8 @@ def main():
             results = model.predict(
                  source=frame,
                  device=device,
-                 verbose=False
+                 nms=None,
+            verbose=False
             )
 
             annotated = results[0].plot()

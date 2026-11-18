@@ -6,9 +6,15 @@ import torch
 from ultralytics import YOLO
 
 ROOT = Path(__file__).resolve().parents[1]
-MODEL_PATH = ROOT / "models" / "pretrained" / "yolo11n.pt"
+
+# Alegem "detect" pentru YOLO26n sau "segment" pentru YOLO26n-seg.
+TASK = "detect"
+MODEL_NAME = "yolo26n" if TASK == "detect" else "yolo26n-seg"
+MODEL_DIR = ROOT / "models/yolo26" / TASK
+
+MODEL_PATH = MODEL_DIR / f"{MODEL_NAME}.pt"
 IMAGE_PATH = ROOT / "data" / "samples" / "bus.jpg"
-OUTPUT_DIR = ROOT / "results" / "smoke_test"
+OUTPUT_DIR = ROOT / "results/yolo26" / TASK / "smoke_test"
 
 def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -32,13 +38,14 @@ def main():
         raise FileNotFoundError(f"Image not found: {IMAGE_PATH}")
 
     # Here we load the pretrained YOLO model
-    model = YOLO(str(MODEL_PATH))
+    model = YOLO(str(MODEL_PATH), task=TASK)
 
     # Warmup
     for _ in range(3):
         model.predict(
             source=str(IMAGE_PATH),
             device=device,
+            nms=None,
             verbose=False
         )
 
@@ -50,7 +57,8 @@ def main():
     results = model.predict(
         source=str(IMAGE_PATH),
         device=device,
-        verbose=False
+        nms=None,
+            verbose=False
     )
 
     if torch.cuda.is_available():
