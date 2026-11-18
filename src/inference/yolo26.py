@@ -171,7 +171,7 @@ def compare(task, backend, image_only=False):
         raise RuntimeError('Inconsistent frames, settings or class maps')
     summaries = []
     for section, aa, bb in [('image', a['frames'][:1], b['frames'][:1]), ('sequence', a['frames'][1:], b['frames'][1:])]:
-        pairs=[]; unmatched_a=0; unmatched_b=0; different=[]; mask_ious=[]
+        pairs=[]; unmatched_a=0; unmatched_b=0; different=[]; mask_ious=[]; pair_details=[]
         for x,y in zip(aa,bb):
             used=set(); matched=0
             ma=masks_at(base/'pytorch',x); mb=masks_at(base/backend,y)
@@ -183,17 +183,23 @@ def compare(task, backend, image_only=False):
                     continue
                 used.add(j);matched+=1;other=y['boxes'][j]
                 pairs.append((overlap,max(abs(u-v) for u,v in zip(box[:4],other[:4])),abs(box[4]-other[4])))
+                detail = dict(image=x['image'], reference_index=i, candidate_index=j, class_id=int(box[5]),
+                              box_iou=overlap, coordinate_delta_px=pairs[-1][1], score_delta=pairs[-1][2])
+                pair_details.append(detail)
                 if task=='segment':
                     if ma is None or mb is None or ma.shape[1:]!=mb.shape[1:]:
                         raise RuntimeError('Missing or incompatible masks')
                     union=np.count_nonzero(ma[i]|mb[j]); intersection=np.count_nonzero(ma[i]&mb[j])
                     mask_ious.append(float(intersection/union) if union else 1.0)
+                    detail['mask_iou'] = mask_ious[-1]
             unmatched_a+=len(x['boxes'])-matched;unmatched_b+=len(y['boxes'])-matched
             if matched!=len(x['boxes']) or matched!=len(y['boxes']):different.append(x['image'])
         summaries.append(dict(section=section, matched=len(pairs), unmatched_pytorch=unmatched_a, unmatched_candidate=unmatched_b,
             min_box_iou=min((v[0] for v in pairs),default=None), max_coordinate_delta_px=max((v[1] for v in pairs),default=None),
             max_score_delta=max((v[2] for v in pairs),default=None), min_mask_iou=min(mask_ious,default=None),
-            mean_mask_iou=float(np.mean(mask_ious)) if mask_ious else None, different_frames=different))
+            mean_mask_iou=float(np.mean(mask_ious)) if mask_ious else None, different_frames=different,
+            worst_box_pairs=sorted(pair_details, key=lambda p:p['box_iou'])[:5],
+            worst_mask_pairs=sorted(pair_details, key=lambda p:p.get('mask_iou',1.0))[:5] if task=='segment' else []))
     report=dict(task=task, candidate=backend, reference='pytorch', matching='greedy same-class IoU >= 0.5, descending reference confidence',
         scope='Agreement, not ground-truth accuracy. No automatic pass/fail tolerance.', summaries=summaries)
     if image_only:
